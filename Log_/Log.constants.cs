@@ -1,11 +1,11 @@
 //********************************************************************************************
 //Author: Sergey Stoyan
 //        sergey.stoyan@gmail.com
-//        sergey_stoyan@yahoo.com
+//        sergey.stoyan@hotmail.com
+//        stoyan@cliversoft.com
 //        http://www.cliversoft.com
-//        26 September 2006
-//Copyright: (C) 2006-2013, Sergey Stoyan
 //********************************************************************************************
+
 using System;
 using System.Threading;
 using System.Diagnostics;
@@ -16,314 +16,134 @@ using System.Collections.Generic;
 namespace Cliver
 {
     /// <summary>
-    /// Multithreaded logging routines
+    /// 
     /// </summary>
     public static partial class Log
     {
-        static object lock_object = new object();
 
         static Log()
         {
-            /*if (ProgramRoutines.IsWebContext) - crashes on Xamarin
+            /*if (ProgramRoutines.IsWebContext) - !!!crashes on Xamarin!!!
                 throw new Exception("Log is disabled in web context.");
 
             if (ProgramRoutines.IsWebContext)
                 ProcessName = System.Web.Compilation.BuildManager.GetGlobalAsaxType().BaseType.Assembly.GetName(false).Name;
             else*/
-            ProcessName = System.Reflection.Assembly.GetEntryAssembly().GetName(false).Name;
+            /*
+            {//this block works on Windows desktop, XamarinMAC, NT service
+                Assembly entryAssembly = Assembly.GetEntryAssembly();
+                //!!!when using WCF, GetEntryAssembly() is NULL 
+                if (entryAssembly == null)
+                    entryAssembly = Assembly.GetCallingAssembly();
+                ProcessName = entryAssembly.GetName(false).Name;
 
-            AppDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(System.IO.Path.DirectorySeparatorChar);
+                AssemblyRoutines.AssemblyInfo ai = new AssemblyRoutines.AssemblyInfo(entryAssembly);
+                CompanyName = string.IsNullOrWhiteSpace(ai.Company) ? "CliverSoft" : ai.Company;
+                ProductName = ai.Product;
 
-            FileVersionInfo fvi = FileVersionInfo.GetVersionInfo(Assembly.GetEntryAssembly().Location);
-            CompanyName = string.IsNullOrWhiteSpace(fvi.CompanyName) ? "CliverSoft" : fvi.CompanyName;
+                AppDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+            }
+            */
+            {//this block works on Windows desktop, NT service. 
+                //!!!Needs testing on XamarinMAC
+                Process p = Process.GetCurrentProcess();
+                ProcessName = p.ProcessName;
+                AppDir = PathRoutines.GetFileDir(p.MainModule.FileName);
+                FileVersionInfo fvi = FileVersionInfo.GetVersionInfo(p.MainModule.FileName);
+                if (fvi != null)
+                {
+                    CompanyName = fvi.CompanyName;
+                    //ProductName = fvi.ProductName;
+                }
+            }            
 
-            //!!!no write permission on macOS!!!
-            CompanyCommonDataDir = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData) + System.IO.Path.DirectorySeparatorChar + CompanyName;
-            AppCommonDataDir = CompanyCommonDataDir + System.IO.Path.DirectorySeparatorChar + Log.ProcessName;
-
-            CompanyUserDataDir = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) + System.IO.Path.DirectorySeparatorChar + CompanyName;
-            AppUserDataDir = CompanyUserDataDir + System.IO.Path.DirectorySeparatorChar + Log.ProcessName;
-            //Log.DeleteOldLogs();
+            //!!!No write permission on macOS
+            //CompanyCommonDataDir = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData) + Path.DirectorySeparatorChar + CompanyName;
+            //!!!No write permission on macOS
+            //AppCompanyCommonDataDir = CompanyCommonDataDir + Path.DirectorySeparatorChar + ProcessName;
+            //CompanyUserDataDir = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) + Path.DirectorySeparatorChar + CompanyName;
+            //AppCompanyUserDataDir = CompanyUserDataDir + Path.DirectorySeparatorChar + ProcessName;
         }
 
         /// <summary>
-        /// Normalized name of this process
+        /// Name of this process.
         /// </summary>
         public static readonly string ProcessName;
 
+        /// <summary>
+        /// Product name of the executing file.
+        /// </summary>
+        //public static readonly string ProductName;
+
+        /// <summary>
+        /// Company name of the executing file.
+        /// </summary>
         public static readonly string CompanyName;
 
         /// <summary>
-        /// Directory where the CliverSoft's application data independent on user are located.
+        /// User-independent company data directory.
+        /// (!)No write permission on macOS
         /// </summary>
-        public static readonly string CompanyCommonDataDir;
+        public static string CompanyCommonDataDir//it is property to avoid forced setting if crashes on certain platform
+        {
+            get
+            {
+                if (companyCommonDataDir == null)
+                    //!!!No write permission on macOS
+                    companyCommonDataDir = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData) + Path.DirectorySeparatorChar + CompanyName;
+                return companyCommonDataDir;
+            }
+        }
+        static string companyCommonDataDir;
 
         /// <summary>
-        /// Directory where the application's data files independent on user are located.
+        /// User-independent company-application data directory.
+        /// (!)No write permission on macOS
         /// </summary>
-        public static readonly string AppCommonDataDir;
+        public static string AppCompanyCommonDataDir//it is property to avoid forced setting if crashes on certain platform
+        {
+            get
+            {
+                if (appCompanyCommonDataDir == null)
+                    //!!!No write permission on macOS
+                    appCompanyCommonDataDir = CompanyCommonDataDir + Path.DirectorySeparatorChar + ProcessName;
+                return appCompanyCommonDataDir;
+            }
+        }
+        static string appCompanyCommonDataDir;
 
         /// <summary>
-        /// Directory where the CliverSoft's application data dependent on user are located.
+        /// User-specific company data directory.
         /// </summary>
-        public static readonly string CompanyUserDataDir;
+        public static string CompanyUserDataDir//it is property to avoid forced setting if crashes on certain platform
+        {
+            get
+            {
+                if (companyUserDataDir == null)
+                    companyUserDataDir = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) + Path.DirectorySeparatorChar + CompanyName;
+                return companyUserDataDir;
+            }
+        }
+        static string companyUserDataDir;
 
         /// <summary>
-        /// Directory where the application's data files dependent on user are located.
+        /// User-specific company-application data directory.
         /// </summary>
-        public static readonly string AppUserDataDir;
+        public static string AppCompanyUserDataDir//it is property to avoid forced setting if crashes on certain platform
+        {
+            get
+            {
+                if (appCompanyUserDataDir == null)
+                    appCompanyUserDataDir = CompanyUserDataDir + Path.DirectorySeparatorChar + ProcessName;
+                return appCompanyUserDataDir;
+            }
+        }
+        static string appCompanyUserDataDir;
 
         /// <summary>
         /// Directory where the application binary is located.
         /// </summary>
         public readonly static string AppDir;
-
-        /// <summary>
-        ///Parent Log directory where logs are recorded
-        /// </summary>
-        public static string WorkDir
-        {
-            get
-            {
-                if (workDir == null)
-                {
-                    Thread deletingOldLogsThread = null;
-                    lock (lock_object)
-                    {
-                        List<string> baseDirs = new List<string> {
-                                Log.AppDir,
-                                CompanyUserDataDir,
-                                CompanyCommonDataDir,
-                                Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
-                                System.IO.Path.GetTempPath() + System.IO.Path.DirectorySeparatorChar + CompanyName + System.IO.Path.DirectorySeparatorChar,
-                                };
-                        if (preWorkDir != null && System.IO.Path.IsPathRooted(preWorkDir))
-                        {
-                            baseDirs.Insert(0, preWorkDir);
-                            preWorkDir = null;
-                        }
-                        foreach (string baseDir in baseDirs)
-                        {
-                            workDir = baseDir + System.IO.Path.DirectorySeparatorChar + preWorkDir + System.IO.Path.DirectorySeparatorChar + Log.ProcessName + WorkDirPrefix;
-                            if (writeLog)
-                                try
-                                {
-                                    if (!Directory.Exists(workDir))
-                                        FileSystemRoutines.CreateDirectory(workDir);
-                                    string testFile = workDir + System.IO.Path.DirectorySeparatorChar + "test";
-                                    File.WriteAllText(testFile, "test");
-                                    File.Delete(testFile);
-                                    break;
-                                }
-                                catch //(Exception e)
-                                {
-                                    workDir = null;
-                                }
-                        }
-                        if (workDir == null)
-                            throw new Exception("Could not access any log directory.");
-                        workDir = PathRoutines.GetNormalizedPath(workDir, false);
-                        if (writeLog)
-                            if (Directory.Exists(workDir) && deleteLogsOlderDays >= 0)
-                                deletingOldLogsThread = startThread(() => { Log.DeleteOldLogs(deleteLogsOlderDays, DeleteOldLogsDialog); });//to avoid a concurrent loop while accessing the log file from the same thread 
-                            else
-                                throw new Exception("Could not create log folder!");
-                    }
-                    // deletingOldLogsThread?.Join();
-                }
-                return workDir;
-            }
-        }
-        static string workDir = null;
-        public const string WorkDirPrefix = @"_Sessions";
-        static Thread startThread(ThreadStart code, bool background = true, ApartmentState state = ApartmentState.Unknown)
-        {
-            Thread t = new Thread(code);
-            if (state != ApartmentState.Unknown)
-                t.SetApartmentState(state);
-            t.IsBackground = background;
-            t.Start();
-            return t;
-        }
-        //static bool HaveWritePermissionForDir(string dir)
-        //{
-        //    var writeAllow = false;
-        //    var writeDeny = false;
-        //    var accessControlList = Directory.GetAccessControl(dir);
-        //    if (accessControlList == null)
-        //        return false;
-        //    var accessRules = accessControlList.GetAccessRules(true, true, typeof(System.Security.Principal.SecurityIdentifier));
-        //    if (accessRules == null)
-        //        return false;
-
-        //    foreach (System.Security.AccessControl.FileSystemAccessRule rule in accessRules)
-        //    {
-        //        if ((System.Security.AccessControl.FileSystemRights.Write & rule.FileSystemRights) != System.Security.AccessControl.FileSystemRights.Write)
-        //            continue;
-        //        if (rule.AccessControlType == System.Security.AccessControl.AccessControlType.Allow)
-        //            writeAllow = true;
-        //        else if (rule.AccessControlType == System.Security.AccessControl.AccessControlType.Deny)
-        //            writeDeny = true;
-        //    }
-
-        //    return writeAllow && !writeDeny;
-        //}
-
-        public static Session MainSession
-        {
-            get
-            {
-                if (mainSession == null)
-                    mainSession = new Session();
-                return mainSession;
-            }
-        }
-        static Session mainSession = null;
-
-        public static bool IsMainSessionOpen
-        {
-            get
-            {
-                return mainSession != null;
-            }
-        }
-
-        /// <summary>
-        /// Output folder name
-        /// </summary>
-        public static string OutputDirName = @"output";
-
-        /// <summary>
-        /// Used to clear all session parameters in order to start a new session
-        /// </summary>
-        public static void ClearSession()
-        {
-            lock (lock_object)
-            {
-                Log.CloseAll();
-
-                workDir = null;
-                if (mainSession != null)
-                    mainSession.Close();
-                mainSession = null;
-
-                GC.Collect();
-            }
-        }
-
-        /// <summary>
-        /// Deletes Log data from disk that is older than the specified threshold
-        /// </summary>
-        public static void DeleteOldLogs(int deleteLogsOlderDays, Func<string, bool> askYesNo = null)
-        {
-            //ThreadWriter tw = Log.Main;
-            //Log.Main.Inform("test");
-            if (delete_old_logs_running)
-                return;
-            //lock (lock_object)//no lock to avoid interlock when writing to log from here
-            //{
-            delete_old_logs_running = true;
-            try
-            {
-                if (deleteLogsOlderDays > 0)
-                {
-                    DateTime FirstLogDate = DateTime.Now.AddDays(-deleteLogsOlderDays);
-
-                    DirectoryInfo di = new DirectoryInfo(Log.WorkDir);
-                    if (!di.Exists)
-                        return;
-
-                    string alert;
-                    switch (Log.mode)
-                    {
-                        case Mode.SESSIONS:
-                            //case Mode.SINGLE_SESSION:
-                            alert = "Session data including caches and logs older than " + FirstLogDate.ToString() + " are to be deleted.\r\nDelete?";
-                            foreach (DirectoryInfo d in di.GetDirectories())
-                            {
-                                if (mainSession != null && d.FullName.StartsWith(mainSession.Path, StringComparison.InvariantCultureIgnoreCase))
-                                    continue;
-                                if (d.LastWriteTime >= FirstLogDate)
-                                    continue;
-                                if (alert != null)
-                                {
-                                    if (askYesNo == null)
-                                        Log.Main.Inform("Deleting session data including caches and logs older than " + FirstLogDate.ToString());
-                                    else
-                                    if (!askYesNo(alert))
-                                        return;
-                                    alert = null;
-                                }
-                                Log.Main.Inform("Deleting old directory: " + d.FullName);
-                                try
-                                {
-                                    d.Delete(true);
-                                }
-                                catch (Exception e)
-                                {
-                                    Log.Error(e);
-                                }
-                            }
-                            break;
-                        case Mode.ONLY_LOG:
-                            alert = "Logs older than " + FirstLogDate.ToString() + " are to be deleted.\r\nDelete?";
-                            foreach (FileInfo f in di.GetFiles())
-                            {
-                                if (f.LastWriteTime >= FirstLogDate)
-                                    continue;
-                                if (alert != null)
-                                {
-                                    if (askYesNo == null)
-                                        Log.Main.Inform("Deleting logs older than " + FirstLogDate.ToString());
-                                    else
-                                    if (!askYesNo(alert))
-                                        return;
-                                    alert = null;
-                                }
-                                Log.Main.Inform("Deleting old file: " + f.FullName);
-                                try
-                                {
-                                    f.Delete();
-                                }
-                                catch (Exception e)
-                                {
-                                    Log.Error(e);
-                                }
-                            }
-                            break;
-                        default:
-                            throw new Exception("Unknown LOGGING_MODE:" + Log.mode);
-                    }
-                }
-            }
-            finally
-            {
-                delete_old_logs_running = false;
-            }
-            //}
-        }
-        static bool delete_old_logs_running = false;
-
-        /// <summary>
-        /// Create absolute path from app directory and relative path
-        /// </summary>
-        /// <param name="file">file path or name</param>
-        /// <returns>absolute path</returns>
-        //public static string GetAbsolutePath(string path)
-        //{
-        //    try
-        //    {
-        //        if (path.Contains(":"))
-        //            return path;
-        //        return System.IO.Path.GetFullPath(Log.AppDir + System.IO.Path.DirectorySeparatorChar + path);
-        //    }
-        //    catch (Exception e)
-        //    {
-        //        LogMessage.Exit(e);
-        //    }
-
-        //    return null;
-        //}
     }
 }
 

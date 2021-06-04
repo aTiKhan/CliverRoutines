@@ -1,21 +1,55 @@
 ﻿/********************************************************************************************
         Author: Sergey Stoyan
         sergey.stoyan@gmail.com
+        sergey.stoyan@hotmail.com
+        stoyan@cliversoft.com
         http://www.cliversoft.com
 ********************************************************************************************/
+
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Cliver
 {
+    /// <summary>
+    /// Features:
+    /// - auto-generating values;
+    /// - auto-disposing IDisposable values that have left the dictionary;
+    /// </summary>
+    /// <typeparam name="KT">key type</typeparam>
+    /// <typeparam name="VT">value type</typeparam>
     public class HandyDictionary<KT, VT> : IDisposable, IEnumerable<KeyValuePair<KT, VT>> //where VT: class
     {
-        public HandyDictionary(Func<KT, VT> get_value)
+        /// <summary>
+        /// Create HandyDictionary with auto-generating value function.
+        /// </summary>
+        /// <param name="getValue">method creating an object for a key</param>
+        public HandyDictionary(GetValue getValue)
         {
-            getValue = get_value;
+            this.getValue = getValue;
         }
-        protected Func<KT, VT> getValue;
+        public delegate VT GetValue(KT key);
+        protected GetValue getValue;
+
+        /// <summary>
+        /// Create HandyDictionary without auto-generating value function.
+        /// </summary>
+        /// <param name="defaultValue">the default value returned for an unset key</param>
+        public HandyDictionary(VT defaultValue)
+        {
+            this.defaultValue = defaultValue;
+        }
+        protected VT defaultValue;
+
+        /// <summary>
+        /// Create HandyDictionary without auto-generating value function.
+        /// </summary>
+        public HandyDictionary()
+        {
+            defaultValue = default;
+        }
 
         ~HandyDictionary()
         {
@@ -28,67 +62,80 @@ namespace Cliver
             {
                 if (keys2value != null)
                 {
-                    if (IsDisposable(typeof(VT)))
-                        foreach (VT v in keys2value.Values)
-                            if (v != null)
-                                ((IDisposable)v).Dispose();
+                    Clear();
                     keys2value = null;
                 }
             }
         }
 
-        static bool IsDisposable(Type t)
-        {
-            return typeof(IDisposable).IsAssignableFrom(t);
-        }
-
+        /// <summary>
+        /// Clear the dictionary and dispose disposable elements.
+        /// </summary>
         virtual public void Clear()
         {
             lock (this)
             {
-                if (IsDisposable(typeof(VT)))
-                    foreach (VT v in keys2value.Values)
-                        if (v != null)
-                            ((IDisposable)v).Dispose();
+                foreach (VT v in keys2value.Values)
+                    if (v != null && v is IDisposable)
+                        ((IDisposable)v).Dispose();
                 keys2value.Clear();
             }
         }
 
-        public void Unset(KT k)
+        /// <summary>
+        /// Remove the element by the key and dispose it if disposable.
+        /// </summary>
+        public void Remove(KT key)
         {
             lock (this)
             {
-                if (IsDisposable(typeof(VT)))
-                {
-                    VT v;
-                    if (keys2value.TryGetValue(k, out v))
-                        if (v != null)
-                            ((IDisposable)v).Dispose();
-                }
-                keys2value.Remove(k);
+                if (keys2value.TryGetValue(key, out VT v))
+                    dispose(v);
+                keys2value.Remove(key);
             }
         }
 
-        public VT this[KT k]
+        void dispose(VT value)
+        {
+            lock (this)
+            {
+                if (value == null || !(value is IDisposable))
+                    return;
+                int vKeyCount = 0;
+                keys2value.Values.Where(a => a.Equals(value)).TakeWhile(a => ++vKeyCount < 2);
+                if (vKeyCount < 2)//make sure it is the only inclusion of the object
+                    ((IDisposable)value).Dispose();
+            }
+        }
+
+        /// <summary>
+        /// It is safe: returns default if does not exists.
+        /// To check for existance, use TryGetValue().
+        /// </summary>
+        /// <param name="key"></param>
+        /// <returns></returns>
+        public VT this[KT key]
         {
             get
             {
                 lock (this)
                 {
-                    VT v;
-                    if (!keys2value.TryGetValue(k, out v))
-                    {
-                        v = getValue(k);
-                        keys2value[k] = v;
-                    }
+                    TryGetValue(key, out VT v);
                     return v;
                 }
             }
-            protected set
+            set
             {
                 lock (this)
                 {
-                    keys2value[k] = value;
+                    if (keys2value.TryGetValue(key, out VT v) && v != null && !v.Equals(value))
+                    {
+                        int vKeyCount = 0;
+                        keys2value.Values.Where(a => a.Equals(v)).TakeWhile(a => ++vKeyCount < 2);
+                        if (vKeyCount < 2)//make sure it is the only inclusion of the object
+                            dispose(v);
+                    }
+                    keys2value[key] = value;
                 }
             }
         }
@@ -119,75 +166,36 @@ namespace Cliver
                 return keys2value.Values;
             }
         }
+
+        public bool TryGetValue(KT key, out VT value)
+        {
+            if (!keys2value.TryGetValue(key, out value))
+            {
+                if (getValue == null)
+                {
+                    value = defaultValue;
+                    return false;
+                }
+                value = getValue(key);
+                keys2value[key] = value;
+            }
+            return true;
+        }
+
+        public void Add(KT key, VT value)
+        {
+            this[key] = value;
+        }
+
+        /// <summary>
+        /// Attention: the count can be implicitly changed due to auto-generating value function
+        /// </summary>
+        public int Count
+        {
+            get
+            {
+                return keys2value.Count;
+            }
+        }
     }
 }
-
-///********************************************************************************************
-//        Author: Sergey Stoyan
-//        sergey.stoyan@gmail.com
-//        http://www.cliversoft.com
-//********************************************************************************************/
-//using System;
-//using System.Collections.Generic;
-//using System.Linq;
-//using System.Text;
-
-//namespace Cliver
-//{
-//    public class HandyDictionary<KT, VT> : Dictionary<KT, VT>, IDisposable  //where VT: class
-//    {
-//        public HandyDictionary(Func<KT, VT> get_object)
-//        {
-//            getObject = get_object;
-//        }
-//        Func<KT, VT> getObject;
-
-//        ~HandyDictionary()
-//        {
-//            Dispose();
-//        }
-
-//        public Enumerator GetEnumerator()
-//        {
-//            return GetEnumerator();
-//        }
-
-//        virtual public void Dispose()
-//        {
-//            Clear();
-//        }
-
-//        static bool IsDisposable(Type t)
-//        {
-//            return typeof(IDisposable).IsAssignableFrom(t);
-//        }
-
-//        virtual public void Clear()
-//        {
-//            lock (this)
-//            {
-//                if (IsDisposable(typeof(VT)))
-//                    foreach (VT v in base.Values)
-//                        ((IDisposable)v).Dispose();
-//                base.Clear();
-//            }
-//        }
-
-//        public VT this[KT k]
-//        {
-//            get
-//            {
-//                lock (this)
-//                {
-//                    VT v;
-//                    if (!base.TryGetValue(k, out v))
-//                    {
-//                        v = getObject(k);
-//                        base[k] = v;
-//                    }
-//                    return v;
-//                }
-//            }
-//        }
-//    }
-//}
